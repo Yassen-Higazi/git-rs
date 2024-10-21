@@ -1,28 +1,19 @@
-#[allow(unused_imports)]
-use std::env;
-#[allow(unused_imports)]
-use std::fs;
+use clap::Parser;
+use git::Git;
 
-use anyhow::Context;
+use crate::cmd_options::CmdOptions;
+
+mod cmd_options;
+mod git;
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = env::args().collect();
+    let options = CmdOptions::parse();
 
-    if args[1] == "init" {
-        create_directory(".git")?;
-        create_directory(".git/objects")?;
-        create_directory(".git/refs")?;
+    println!("Options: {:?}", options);
 
-        fs::write(".git/HEAD", "ref: refs/heads/main\n")?;
+    let git = Git::new();
 
-        println!("Initialized git directory")
-    } else {
-        println!("unknown command: {}", args[1])
-    }
+    git.execute(&options.command)?;
 
     Ok(())
-}
-
-fn create_directory(dir_name: &str) -> anyhow::Result<()> {
-    fs::create_dir(dir_name).with_context(|| format!("Could not create directory {dir_name}"))
 }
