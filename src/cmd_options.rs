@@ -16,9 +16,13 @@ pub enum Commands {
 
         #[arg(short = 'p', long = "pretty_print")]
         pretty_print: bool,
+
+        hash: String,
     },
 
     Init,
+
+    Help,
 }
 
 impl Display for Commands {
@@ -29,6 +33,7 @@ impl Display for Commands {
         match self {
             Commands::CatFile { .. } => command_name = "cat-file",
             Commands::Init => command_name = "init",
+            Commands::Help => command_name = "help",
         }
 
         write!(f, "{command_name}")

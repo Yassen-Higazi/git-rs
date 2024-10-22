@@ -1,7 +1,5 @@
-use anyhow::Context;
-
-use crate::cmd_options::Commands;
-use std::fs;
+use crate::utils::*;
+use crate::{cmd_options::Commands, git_objects::GitObject};
 
 pub struct Git {}
 
@@ -13,22 +11,34 @@ impl Git {
     pub fn execute(&self, command: &Commands) -> anyhow::Result<()> {
         match command {
             Commands::Init => {
-                self.create_directory(".git")?;
-                self.create_directory(".git/refs")?;
-                self.create_directory(".git/objects")?;
+                create_directory(".git")?;
+                create_directory(".git/refs")?;
+                create_directory(".git/objects")?;
 
-                fs::write(".git/HEAD", "ref: refs/heads/main\n")?;
+                write_to_file(".git/HEAD", b"ref: refs/heads/main\n")?;
 
                 println!("Initialized git directory")
+            }
+
+            Commands::CatFile {
+                print_file_type,
+                pretty_print,
+                hash,
+            } => {
+                let compressed_content = read_object(hash.as_str())?;
+
+                let object = GitObject::from_file_content(hash.to_owned(), compressed_content)?;
+
+                if *pretty_print {
+                    object.print_content();
+                } else if *print_file_type {
+                    print!("{}", object);
+                }
             }
 
             _ => println!("Unsupported command: {}", command),
         }
 
         Ok(())
-    }
-
-    fn create_directory(&self, dir_name: &str) -> anyhow::Result<()> {
-        fs::create_dir(dir_name).with_context(|| format!("Could not create directory {dir_name}"))
     }
 }
