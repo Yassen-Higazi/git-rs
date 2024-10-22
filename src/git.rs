@@ -1,3 +1,5 @@
+use anyhow::bail;
+
 use crate::utils::*;
 use crate::{cmd_options::Commands, git_objects::GitObject};
 
@@ -33,9 +35,11 @@ impl Git {
                 if *pretty_print {
                     object.print_content();
                 } else if *print_file_type {
-                    print!("{}", object);
+                    object.print_type();
                 } else if *size {
-                    print!("0");
+                    object.print_size()?;
+                } else {
+                    bail!("Invalid command");
                 }
             }
 

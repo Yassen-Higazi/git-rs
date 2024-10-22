@@ -17,7 +17,7 @@ pub enum Commands {
         #[arg(short = 'p', long = "pretty_print")]
         pretty_print: bool,
 
-        #[arg(short = 'c', long = "size")]
+        #[arg(short = 's', long = "size")]
         size: bool,
 
         hash: String,

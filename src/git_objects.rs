@@ -2,6 +2,7 @@ use anyhow::bail;
 
 use crate::utils::decompress;
 
+#[derive(Debug)]
 pub enum GitObject {
     Blob {
         hash: String,
@@ -59,8 +60,8 @@ impl GitObject {
 
             return Ok(GitObject::Blob {
                 hash,
-                size: final_content.len() as u64,
                 content: final_content,
+                size: arr[0].replace("blob ", "").parse::<u64>()?,
             });
         }
 
@@ -90,5 +91,23 @@ impl GitObject {
 
             GitObject::Commit { .. } => todo!(),
         }
+    }
+
+    pub fn print_type(&self) {
+        print!("{}", self);
+    }
+
+    pub fn print_size(&self) -> anyhow::Result<()> {
+        match self {
+            GitObject::Blob {
+                hash,
+                size,
+                content,
+            } => print!("{size}"),
+
+            _ => bail!("Not Implemented"),
+        };
+
+        Ok(())
     }
 }
