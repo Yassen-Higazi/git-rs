@@ -24,6 +24,7 @@ impl Git {
                 print_file_type,
                 pretty_print,
                 hash,
+                size,
             } => {
                 let compressed_content = read_object(hash.as_str())?;
 
@@ -33,6 +34,8 @@ impl Git {
                     object.print_content();
                 } else if *print_file_type {
                     print!("{}", object);
+                } else if *size {
+                    print!("0");
                 }
             }
 

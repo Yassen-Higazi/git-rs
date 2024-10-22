@@ -3,7 +3,11 @@ use anyhow::bail;
 use crate::utils::decompress;
 
 pub enum GitObject {
-    Blob(String, String),
+    Blob {
+        hash: String,
+        size: u64,
+        content: String,
+    },
 
     Tree {
         hash: String,
@@ -28,7 +32,7 @@ impl std::fmt::Display for GitObject {
         let mut object_name: &str = "";
 
         match self {
-            GitObject::Blob(_, _) => object_name = "blob",
+            GitObject::Blob { .. } => object_name = "blob",
             GitObject::Tree { .. } => object_name = "tree",
             GitObject::Commit { .. } => object_name = "commit",
         }
@@ -44,11 +48,23 @@ impl GitObject {
     ) -> anyhow::Result<GitObject> {
         let content = decompress(&compressed_content)?;
 
-        if content.starts_with("blob") {
-            return Ok(GitObject::Blob(hash, content));
+        let obj_type = &content[0..4];
+
+        if obj_type == "blob" {
+            // skip blob
+
+            let arr = content.split("\0").collect::<Vec<&str>>();
+
+            let final_content = arr[1..].join("");
+
+            return Ok(GitObject::Blob {
+                hash,
+                size: final_content.len() as u64,
+                content: final_content,
+            });
         }
 
-        if content.starts_with("tree") {
+        if obj_type == "tree" {
             return Ok(GitObject::Tree {
                 hash,
                 objects: vec![],
@@ -60,7 +76,11 @@ impl GitObject {
 
     pub fn print_content(&self) {
         match self {
-            GitObject::Blob(_, content) => print!("{content}"),
+            GitObject::Blob {
+                hash,
+                size: len,
+                content,
+            } => print!("{content}"),
 
             GitObject::Tree { hash, objects } => {
                 for object in objects {
