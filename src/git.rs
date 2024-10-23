@@ -43,6 +43,26 @@ impl Git {
                 }
             }
 
+            Commands::HashObject {
+                write,
+                object_type,
+                filename,
+            } => {
+                let content = read_file(filename)?;
+
+                let object = GitObject::from_file_content_and_type(
+                    object_type,
+                    String::from_utf8(content)?,
+                    None,
+                )?;
+
+                if *write {
+                    object.write_to_file()?;
+                }
+
+                println!("{}", object.get_hash());
+            }
+
             _ => println!("Unsupported command: {}", command),
         }
 

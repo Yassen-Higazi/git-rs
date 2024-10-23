@@ -1,8 +1,9 @@
 use anyhow::bail;
 
-use crate::utils::decompress;
+use crate::utils::{compress, create_directory, decompress, generate_object_id, write_to_file};
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum GitObject {
     Blob {
         hash: String,
@@ -51,40 +52,48 @@ impl GitObject {
 
         let obj_type = &content[0..4];
 
-        if obj_type == "blob" {
-            // skip blob
+        let arr = content.split("\0").collect::<Vec<&str>>();
 
-            let arr = content.split("\0").collect::<Vec<&str>>();
+        let final_content = arr[1..].join("");
 
-            let final_content = arr[1..].join("");
+        GitObject::from_file_content_and_type(obj_type, final_content, Some(hash))
+    }
 
-            return Ok(GitObject::Blob {
-                hash,
-                content: final_content,
-                size: arr[0].replace("blob ", "").parse::<u64>()?,
-            });
+    pub fn from_file_content_and_type(
+        obj_type: &str,
+        content: String,
+        hash: Option<String>,
+    ) -> anyhow::Result<GitObject> {
+        match obj_type {
+            "blob" => {
+                let object_hash: String = match hash {
+                    Some(hash) => hash,
+
+                    None => {
+                        let hash_content = format!("blob {}\0{}", content.len(), content);
+
+                        generate_object_id(hash_content.as_bytes())?
+                    }
+                };
+
+                Ok(GitObject::Blob {
+                    hash: object_hash,
+                    size: content.len() as u64,
+                    content,
+                })
+            }
+
+            _ => bail!("Unsupported Type"),
         }
-
-        if obj_type == "tree" {
-            return Ok(GitObject::Tree {
-                hash,
-                objects: vec![],
-            });
-        }
-
-        bail!("Unsupported Type")
     }
 
     pub fn print_content(&self) {
         match self {
-            GitObject::Blob {
-                hash,
-                size: len,
-                content,
-            } => print!("{content}"),
+            GitObject::Blob { content, .. } => print!("{content}"),
 
-            GitObject::Tree { hash, objects } => {
+            GitObject::Tree { objects, .. } => {
                 for object in objects {
+                    // TODO: fix: print summary
                     object.print_content();
                 }
             }
@@ -99,15 +108,47 @@ impl GitObject {
 
     pub fn print_size(&self) -> anyhow::Result<()> {
         match self {
-            GitObject::Blob {
-                hash,
-                size,
-                content,
-            } => print!("{size}"),
+            GitObject::Blob { size, .. } => print!("{size}"),
 
             _ => bail!("Not Implemented"),
         };
 
         Ok(())
+    }
+
+    pub fn write_to_file(&self) -> anyhow::Result<()> {
+        match self {
+            GitObject::Blob {
+                hash,
+                size,
+                content,
+            } => {
+                let (dir_name, file_name) = hash.split_at(2);
+
+                let dir_path = format!(".git/objects/{dir_name}");
+
+                let file_path = format!("{dir_path}/{file_name}");
+
+                create_directory(dir_path.as_str())?;
+
+                let final_content = format!("blob {size}\0{content}");
+
+                let compressed_content = compress(final_content.as_bytes())?;
+
+                write_to_file(file_path.as_str(), compressed_content.as_slice())?;
+
+                Ok(())
+            }
+
+            _ => bail!("Not Implemented"),
+        }
+    }
+
+    pub fn get_hash(&self) -> &String {
+        match self {
+            GitObject::Blob { hash, .. } => hash,
+            GitObject::Tree { hash, .. } => hash,
+            GitObject::Commit { hash, .. } => hash,
+        }
     }
 }
