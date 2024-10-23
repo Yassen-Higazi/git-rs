@@ -3,6 +3,62 @@ use anyhow::bail;
 use crate::utils::{compress, create_directory, decompress, generate_object_id, write_to_file};
 
 #[derive(Debug)]
+pub struct TreeObject {
+    hash: String,
+
+    name: String,
+
+    mode: TreeFileModes,
+}
+
+impl std::fmt::Display for TreeObject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} {} {}", self.mode, self.name, self.hash)
+    }
+}
+
+#[derive(Debug)]
+#[allow(dead_code)]
+pub enum TreeFileModes {
+    Regular,
+
+    Executable,
+
+    SymbolicLink,
+
+    Directory,
+}
+
+impl From<&str> for TreeFileModes {
+    fn from(value: &str) -> Self {
+        match value {
+            "100644" => TreeFileModes::Regular,
+
+            "100755" => TreeFileModes::Executable,
+
+            "120000" => TreeFileModes::SymbolicLink,
+
+            "040000" => TreeFileModes::Directory,
+
+            _ => TreeFileModes::Regular,
+        }
+    }
+}
+
+impl std::fmt::Display for TreeFileModes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            TreeFileModes::Regular => "100644",
+            TreeFileModes::Executable => "100755",
+            TreeFileModes::SymbolicLink => "120000",
+            TreeFileModes::Directory => "040000",
+        };
+
+        write!(f, "{value}")
+    }
+}
+
+#[derive(Debug)]
 #[allow(dead_code)]
 pub enum GitObject {
     Blob {
@@ -13,7 +69,7 @@ pub enum GitObject {
 
     Tree {
         hash: String,
-        objects: Vec<GitObject>,
+        objects: Vec<TreeObject>,
     },
 
     Commit {
@@ -65,22 +121,32 @@ impl GitObject {
         hash: Option<String>,
     ) -> anyhow::Result<GitObject> {
         match obj_type {
-            "blob" => {
-                let object_hash: String = match hash {
-                    Some(hash) => hash,
+            "blob" => Ok(GitObject::Blob {
+                hash: GitObject::get_or_generate_hash(hash, &content)?,
+                size: content.len() as u64,
+                content,
+            }),
 
-                    None => {
-                        let hash_content = format!("blob {}\0{}", content.len(), content);
+            "tree" => {
+                let hash = GitObject::get_or_generate_hash(hash, &content)?;
 
-                        generate_object_id(hash_content.as_bytes())?
-                    }
-                };
+                let mut objects = Vec::<TreeObject>::new();
 
-                Ok(GitObject::Blob {
-                    hash: object_hash,
-                    size: content.len() as u64,
-                    content,
-                })
+                for cnt in content.split("\n") {
+                    println!("{cnt}");
+
+                    let split_cnt = cnt.split_whitespace().collect::<Vec<&str>>();
+
+                    let tree_object = TreeObject {
+                        hash: split_cnt[2].to_string(),
+                        name: split_cnt[1].to_string(),
+                        mode: TreeFileModes::from(split_cnt[0]),
+                    };
+
+                    objects.push(tree_object);
+                }
+
+                Ok(GitObject::Tree { hash, objects })
             }
 
             _ => bail!("Unsupported Type"),
@@ -93,8 +159,7 @@ impl GitObject {
 
             GitObject::Tree { objects, .. } => {
                 for object in objects {
-                    // TODO: fix: print summary
-                    object.print_content();
+                    print!("{}", object);
                 }
             }
 
@@ -149,6 +214,18 @@ impl GitObject {
             GitObject::Blob { hash, .. } => hash,
             GitObject::Tree { hash, .. } => hash,
             GitObject::Commit { hash, .. } => hash,
+        }
+    }
+
+    fn get_or_generate_hash(hash: Option<String>, content: &String) -> anyhow::Result<String> {
+        match hash {
+            Some(hash) => Ok(hash),
+
+            None => {
+                let hash_content = format!("blob {}\0{}", content.len(), content);
+
+                generate_object_id(hash_content.as_bytes())
+            }
         }
     }
 }

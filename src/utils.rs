@@ -40,7 +40,9 @@ pub fn decompress(bytes: &[u8]) -> anyhow::Result<String> {
 
     writer = z.finish()?;
 
-    String::from_utf8(writer).with_context(|| "Could not decompress content")
+    // println!("Decompressed data: {:?}", writer);
+
+    String::from_utf8(writer).with_context(|| "Could not parse decompress content")
 }
 
 pub fn create_directory(dir_name: &str) -> anyhow::Result<bool> {
