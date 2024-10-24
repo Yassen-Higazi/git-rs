@@ -1,7 +1,8 @@
 use anyhow::bail;
 
 use crate::utils::{
-    compress, create_object_directory, decompress, generate_object_id, to_hex_string, write_to_file,
+    compress, create_object_directory, decompress, generate_object_id, read_object, to_hex_string,
+    write_to_file,
 };
 
 #[derive(Debug)]
@@ -26,7 +27,6 @@ impl std::fmt::Display for TreeObject {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum TreeFileModes {
     Regular,
 
@@ -267,6 +267,13 @@ impl GitObject {
                 let mut objects_str = String::new();
 
                 for object in objects {
+                    let git_object_content = read_object(object.hash.as_str())?;
+
+                    let git_object =
+                        GitObject::from_file_content(object.hash.clone(), git_object_content)?;
+
+                    git_object.write_to_file()?;
+
                     objects_str.push_str(
                         format!("{} {}\0{}", object.mode, object.name, object.hash).as_str(),
                     )
