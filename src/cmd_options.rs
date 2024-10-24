@@ -33,6 +33,13 @@ pub enum Commands {
         filename: String,
     },
 
+    LsTree {
+        #[arg(long = "name-only")]
+        name_only: bool,
+
+        hash: String,
+    },
+
     Init,
 
     Help,
@@ -40,15 +47,13 @@ pub enum Commands {
 
 impl Display for Commands {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        #[allow(unused_assignments)]
-        let mut command_name: &str = "";
-
-        match self {
-            Commands::Init => command_name = "init",
-            Commands::Help => command_name = "help",
-            Commands::CatFile { .. } => command_name = "cat-file",
-            Commands::HashObject { .. } => command_name = "hash-object",
-        }
+        let command_name = match self {
+            Commands::Init => "init",
+            Commands::Help => "help",
+            Commands::LsTree { .. } => "ls-tree",
+            Commands::CatFile { .. } => "cat-file",
+            Commands::HashObject { .. } => "hash-object",
+        };
 
         write!(f, "{command_name}")
     }

@@ -31,7 +31,7 @@ pub fn compress(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     Ok(compressed)
 }
 
-pub fn decompress(bytes: &[u8]) -> anyhow::Result<String> {
+pub fn decompress(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut writer = Vec::new();
 
     let mut z = ZlibDecoder::new(writer);
@@ -42,7 +42,19 @@ pub fn decompress(bytes: &[u8]) -> anyhow::Result<String> {
 
     // println!("Decompressed data: {:?}", writer);
 
-    String::from_utf8(writer).with_context(|| "Could not parse decompress content")
+    Ok(writer)
+}
+
+pub fn create_object_directory(hash: &str) -> anyhow::Result<String> {
+    let (dir_name, file_name) = hash.split_at(2);
+
+    let dir_path = format!(".git/objects/{dir_name}");
+
+    let file_path = format!("{dir_path}/{file_name}");
+
+    create_directory(dir_path.as_str())?;
+
+    Ok(file_path)
 }
 
 pub fn create_directory(dir_name: &str) -> anyhow::Result<bool> {
@@ -54,9 +66,7 @@ pub fn create_directory(dir_name: &str) -> anyhow::Result<bool> {
         Err(e) => match e.kind() {
             std::io::ErrorKind::AlreadyExists => Ok(false),
 
-            _ => {
-                bail!("{e}")
-            }
+            _ => bail!("{e}"),
         },
     }
 }

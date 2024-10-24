@@ -33,7 +33,7 @@ impl Git {
                 let object = GitObject::from_file_content(hash.to_owned(), compressed_content)?;
 
                 if *pretty_print {
-                    object.print_content();
+                    object.print_content(false);
                 } else if *print_file_type {
                     object.print_type();
                 } else if *size {
@@ -50,17 +50,21 @@ impl Git {
             } => {
                 let content = read_file(filename)?;
 
-                let object = GitObject::from_file_content_and_type(
-                    object_type,
-                    String::from_utf8(content)?,
-                    None,
-                )?;
+                let object = GitObject::from_file_content_and_type(object_type, &content, None)?;
 
                 if *write {
                     object.write_to_file()?;
                 }
 
                 println!("{}", object.get_hash());
+            }
+
+            Commands::LsTree { name_only, hash } => {
+                let compressed_content = read_object(hash)?;
+
+                let object = GitObject::from_file_content(hash.clone(), compressed_content)?;
+
+                object.print_content(*name_only);
             }
 
             _ => println!("Unsupported command: {}", command),

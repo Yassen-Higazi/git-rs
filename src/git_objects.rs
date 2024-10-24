@@ -1,19 +1,27 @@
 use anyhow::bail;
 
-use crate::utils::{compress, create_directory, decompress, generate_object_id, write_to_file};
+use crate::utils::{
+    compress, create_object_directory, decompress, generate_object_id, to_hex_string, write_to_file,
+};
 
 #[derive(Debug)]
 pub struct TreeObject {
-    hash: String,
+    pub hash: String,
 
-    name: String,
+    pub name: String,
 
-    mode: TreeFileModes,
+    pub mode: TreeFileModes,
+
+    object_type: String,
 }
 
 impl std::fmt::Display for TreeObject {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {} {}", self.mode, self.name, self.hash)
+        writeln!(
+            f,
+            "{} {} {}    {}",
+            self.mode, self.object_type, self.hash, self.name
+        )
     }
 }
 
@@ -38,7 +46,7 @@ impl From<&str> for TreeFileModes {
 
             "120000" => TreeFileModes::SymbolicLink,
 
-            "040000" => TreeFileModes::Directory,
+            "040000" | "40000" => TreeFileModes::Directory,
 
             _ => TreeFileModes::Regular,
         }
@@ -59,7 +67,6 @@ impl std::fmt::Display for TreeFileModes {
 }
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum GitObject {
     Blob {
         hash: String,
@@ -68,10 +75,12 @@ pub enum GitObject {
     },
 
     Tree {
+        size: u64,
         hash: String,
         objects: Vec<TreeObject>,
     },
 
+    #[allow(dead_code)]
     Commit {
         hash: String,
         tree: Box<GitObject>,
@@ -106,60 +115,107 @@ impl GitObject {
     ) -> anyhow::Result<GitObject> {
         let content = decompress(&compressed_content)?;
 
-        let obj_type = &content[0..4];
+        let (obj_type, final_content) = GitObject::parse_content_header(&content)?;
 
-        let arr = content.split("\0").collect::<Vec<&str>>();
-
-        let final_content = arr[1..].join("");
-
-        GitObject::from_file_content_and_type(obj_type, final_content, Some(hash))
+        GitObject::from_file_content_and_type(obj_type.as_str(), final_content, Some(hash))
     }
 
     pub fn from_file_content_and_type(
         obj_type: &str,
-        content: String,
+        content: &[u8],
         hash: Option<String>,
     ) -> anyhow::Result<GitObject> {
         match obj_type {
-            "blob" => Ok(GitObject::Blob {
-                hash: GitObject::get_or_generate_hash(hash, &content)?,
-                size: content.len() as u64,
-                content,
-            }),
+            "blob" => {
+                let final_content = String::from_utf8(content.to_vec())?;
+
+                Ok(GitObject::Blob {
+                    content: final_content,
+                    size: content.len() as u64,
+                    hash: GitObject::get_or_generate_hash(obj_type, hash, content)?,
+                })
+            }
 
             "tree" => {
-                let hash = GitObject::get_or_generate_hash(hash, &content)?;
+                let hash = GitObject::get_or_generate_hash(obj_type, hash, content)?;
 
                 let mut objects = Vec::<TreeObject>::new();
 
-                for cnt in content.split("\n") {
-                    println!("{cnt}");
+                let mut iter = content.iter();
 
-                    let split_cnt = cnt.split_whitespace().collect::<Vec<&str>>();
+                while let Some(&byte) = iter.next() {
+                    // Parse mode: Read bytes until space (' ')
+                    let mut mode = Vec::new();
 
-                    let tree_object = TreeObject {
-                        hash: split_cnt[2].to_string(),
-                        name: split_cnt[1].to_string(),
-                        mode: TreeFileModes::from(split_cnt[0]),
+                    mode.push(byte);
+
+                    for &b in iter.by_ref() {
+                        if b == b' ' {
+                            break;
+                        }
+
+                        mode.push(b);
+                    }
+
+                    let mode_str = String::from_utf8_lossy(&mode);
+
+                    // Parse filename: Read bytes until null byte ('\0')
+                    let mut filename = Vec::new();
+
+                    for &b in iter.by_ref() {
+                        if b == 0 {
+                            break;
+                        }
+
+                        filename.push(b);
+                    }
+
+                    let filename_str = String::from_utf8_lossy(&filename);
+
+                    // Parse the SHA-1 hash (next 20 bytes)
+                    let sha1_hash: Vec<u8> = iter.by_ref().take(20).cloned().collect();
+
+                    let hash_str = to_hex_string(sha1_hash.as_slice());
+
+                    let mode_enum = TreeFileModes::from(mode_str.to_string().as_str());
+
+                    let object = TreeObject {
+                        hash: hash_str,
+                        name: filename_str.to_string(),
+                        object_type: match mode_enum {
+                            TreeFileModes::Directory => "tree".to_string(),
+
+                            _ => "blob".to_string(),
+                        },
+
+                        mode: mode_enum,
                     };
 
-                    objects.push(tree_object);
+                    objects.push(object);
                 }
 
-                Ok(GitObject::Tree { hash, objects })
+                Ok(GitObject::Tree {
+                    hash,
+                    objects,
+                    size: content.len() as u64,
+                })
             }
 
             _ => bail!("Unsupported Type"),
         }
     }
 
-    pub fn print_content(&self) {
+    pub fn print_content(&self, name_only: bool) {
         match self {
             GitObject::Blob { content, .. } => print!("{content}"),
 
             GitObject::Tree { objects, .. } => {
                 for object in objects {
-                    print!("{}", object);
+                    if name_only {
+                        println!("{}", object.name);
+                    } else {
+                        print!("{}", object);
+                    }
                 }
             }
 
@@ -175,6 +231,8 @@ impl GitObject {
         match self {
             GitObject::Blob { size, .. } => print!("{size}"),
 
+            GitObject::Tree { size, .. } => print!("{size}"),
+
             _ => bail!("Not Implemented"),
         };
 
@@ -188,19 +246,35 @@ impl GitObject {
                 size,
                 content,
             } => {
-                let (dir_name, file_name) = hash.split_at(2);
-
-                let dir_path = format!(".git/objects/{dir_name}");
-
-                let file_path = format!("{dir_path}/{file_name}");
-
-                create_directory(dir_path.as_str())?;
+                let path = create_object_directory(hash)?;
 
                 let final_content = format!("blob {size}\0{content}");
 
                 let compressed_content = compress(final_content.as_bytes())?;
 
-                write_to_file(file_path.as_str(), compressed_content.as_slice())?;
+                write_to_file(path.as_str(), compressed_content.as_slice())?;
+
+                Ok(())
+            }
+
+            GitObject::Tree {
+                size,
+                hash,
+                objects,
+            } => {
+                let path = create_object_directory(hash)?;
+
+                let mut objects_str = String::new();
+
+                for object in objects {
+                    objects_str.push_str(
+                        format!("{} {}\0{}", object.mode, object.name, object.hash).as_str(),
+                    )
+                }
+
+                let final_content = format!("tree {size}\0{objects_str}");
+
+                write_to_file(path.as_str(), final_content.as_bytes())?;
 
                 Ok(())
             }
@@ -217,15 +291,48 @@ impl GitObject {
         }
     }
 
-    fn get_or_generate_hash(hash: Option<String>, content: &String) -> anyhow::Result<String> {
+    fn get_or_generate_hash(
+        object_type: &str,
+        hash: Option<String>,
+        content: &[u8],
+    ) -> anyhow::Result<String> {
         match hash {
             Some(hash) => Ok(hash),
 
             None => {
-                let hash_content = format!("blob {}\0{}", content.len(), content);
+                let hash_header = format!("{object_type} {}\0", content.len());
 
-                generate_object_id(hash_content.as_bytes())
+                let hash_content = [hash_header.as_bytes(), content].concat();
+
+                generate_object_id(hash_content.as_slice())
             }
         }
+    }
+
+    fn parse_content_header(content: &[u8]) -> anyhow::Result<(String, &[u8])> {
+        let mut type_len = 4;
+        let mut object_type = &content[0..type_len];
+
+        if object_type == b"comm" {
+            type_len = 6;
+            object_type = &content[0..type_len];
+        }
+
+        let object_type_str = String::from_utf8(object_type.to_vec())?;
+
+        let mut content_index = type_len + 1;
+
+        while content_index < content.len() {
+            if &content[content_index..content_index + 1] == b"\0" {
+                content_index += 1;
+                break;
+            }
+
+            content_index += 1;
+        }
+
+        let final_content = &content[content_index..];
+
+        Ok((object_type_str, final_content))
     }
 }
