@@ -94,3 +94,17 @@ pub fn read_object(hash: &str) -> anyhow::Result<Vec<u8>> {
 pub fn read_file(file_name: &str) -> anyhow::Result<Vec<u8>> {
     fs::read(file_name).with_context(|| format!("Could not read file: {file_name}"))
 }
+
+pub fn list_directory(dir_name: &str) -> anyhow::Result<Vec<fs::DirEntry>> {
+    let paths = fs::read_dir(dir_name)?;
+
+    let mut entries = Vec::new();
+
+    for path in paths {
+        if let Ok(elm) = path {
+            entries.push(elm);
+        }
+    }
+
+    Ok(entries)
+}

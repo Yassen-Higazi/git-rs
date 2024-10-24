@@ -40,6 +40,8 @@ pub enum Commands {
         hash: String,
     },
 
+    WriteTree,
+
     Init,
 
     Help,
@@ -50,6 +52,7 @@ impl Display for Commands {
         let command_name = match self {
             Commands::Init => "init",
             Commands::Help => "help",
+            Commands::WriteTree => "write-tree",
             Commands::LsTree { .. } => "ls-tree",
             Commands::CatFile { .. } => "cat-file",
             Commands::HashObject { .. } => "hash-object",

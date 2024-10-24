@@ -1,8 +1,10 @@
+use std::{fs, hash::Hash};
+
 use anyhow::bail;
 
 use crate::utils::{
-    compress, create_object_directory, decompress, generate_object_id, read_object, to_hex_string,
-    write_to_file,
+    compress, create_object_directory, decompress, generate_object_id, list_directory, read_file,
+    read_object, to_hex_string, write_to_file,
 };
 
 #[derive(Debug)]
@@ -14,6 +16,21 @@ pub struct TreeObject {
     pub mode: TreeFileModes,
 
     object_type: String,
+}
+
+impl TreeObject {
+    pub fn new(hash: String, name: String, mode: TreeFileModes) -> TreeObject {
+        Self {
+            hash,
+            name,
+            object_type: match &mode {
+                TreeFileModes::Directory => "tree".to_string(),
+
+                _ => "blob".to_string(),
+            },
+            mode,
+        }
+    }
 }
 
 impl std::fmt::Display for TreeObject {
@@ -49,6 +66,18 @@ impl From<&str> for TreeFileModes {
             "040000" | "40000" => TreeFileModes::Directory,
 
             _ => TreeFileModes::Regular,
+        }
+    }
+}
+
+impl From<fs::FileType> for TreeFileModes {
+    fn from(value: fs::FileType) -> Self {
+        if value.is_dir() {
+            Self::Directory
+        } else if value.is_symlink() {
+            Self::SymbolicLink
+        } else {
+            Self::Regular
         }
     }
 }
@@ -203,6 +232,50 @@ impl GitObject {
 
             _ => bail!("Unsupported Type"),
         }
+    }
+
+    pub fn from_directory(dir_path: &str) -> anyhow::Result<Self> {
+        println!("path {dir_path}");
+
+        let files = list_directory(dir_path)?;
+
+        println!("Files: {:?}", files);
+
+        let mut objects = Vec::new();
+
+        for entry in files {
+            let file_path = entry.path();
+
+            let file_type = entry.file_type()?;
+
+            let path_str = file_path.to_str().expect("Could not get path string");
+
+            let object = if file_type.is_dir() {
+                GitObject::from_directory(path_str)?
+            } else {
+                let compressed_content = read_file(path_str)?;
+
+                let content = decompress(&compressed_content)?;
+
+                let hash = generate_object_id(content.as_slice())?;
+
+                GitObject::from_file_content(hash, compressed_content)?
+            };
+
+            let mode = TreeFileModes::from(file_type);
+
+            objects.push(TreeObject::new(
+                object.get_hash(),
+                entry.file_name().to_str(),
+                mode,
+            ));
+        }
+
+        Ok(GitObject::Tree {
+            size: 0,
+            hash: String::new(),
+            objects,
+        })
     }
 
     pub fn print_content(&self, name_only: bool) {
