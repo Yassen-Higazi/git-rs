@@ -2,7 +2,7 @@ use anyhow::{bail, Context};
 use flate2::write::{ZlibDecoder, ZlibEncoder};
 use flate2::Compression;
 use sha1::{Digest, Sha1};
-use std::fs;
+use std::fs::{self, DirEntry};
 use std::io::Write;
 
 pub fn to_hex_string(content: &[u8]) -> String {
@@ -103,8 +103,60 @@ pub fn list_directory(dir_name: &str) -> anyhow::Result<Vec<fs::DirEntry>> {
     for path in paths {
         if let Ok(elm) = path {
             entries.push(elm);
+        } else {
+            continue;
         }
     }
 
     Ok(entries)
+}
+
+pub fn get_hidden_files() -> anyhow::Result<Vec<String>> {
+    let gitingore_result = read_file(".gitignore");
+
+    let hidden_files = match gitingore_result {
+        Ok(gitignore_buff) => {
+            let hidden_files_str = String::from_utf8(gitignore_buff)?;
+
+            let mut hidden_files: Vec<String> = hidden_files_str
+                .split("\n")
+                .map(|f| f.to_string())
+                .collect();
+
+            hidden_files.push(".git".to_string());
+
+            hidden_files
+        }
+
+        Err(err) => {
+            let err_str = err.to_string();
+
+            if err_str.contains(".gitignore") {
+                Vec::new()
+            } else {
+                bail!(err)
+            }
+        }
+    };
+
+    Ok(hidden_files)
+}
+
+pub fn filter_hidden_files(files: &[DirEntry]) -> anyhow::Result<Vec<&fs::DirEntry>> {
+    let hidden_files = get_hidden_files()?;
+
+    let allowed_files = files
+        .iter()
+        .filter(|entry| {
+            let file_name = entry.file_name().to_str().unwrap_or(".git").to_string();
+
+            if hidden_files.is_empty() {
+                file_name != ".git"
+            } else {
+                file_name != ".git" || !hidden_files.contains(&file_name)
+            }
+        })
+        .collect();
+
+    Ok(allowed_files)
 }

@@ -1,10 +1,10 @@
-use std::{fs, hash::Hash};
+use std::fs;
 
 use anyhow::bail;
 
 use crate::utils::{
-    compress, create_object_directory, decompress, generate_object_id, list_directory, read_file,
-    read_object, to_hex_string, write_to_file,
+    compress, create_object_directory, decompress, filter_hidden_files, generate_object_id,
+    list_directory, read_file, read_object, to_hex_string, write_to_file,
 };
 
 #[derive(Debug)]
@@ -16,10 +16,17 @@ pub struct TreeObject {
     pub mode: TreeFileModes,
 
     object_type: String,
+
+    pub git_object: GitObject,
 }
 
 impl TreeObject {
-    pub fn new(hash: String, name: String, mode: TreeFileModes) -> TreeObject {
+    pub fn new(
+        hash: String,
+        name: String,
+        mode: TreeFileModes,
+        git_object: GitObject,
+    ) -> TreeObject {
         Self {
             hash,
             name,
@@ -29,6 +36,7 @@ impl TreeObject {
                 _ => "blob".to_string(),
             },
             mode,
+            git_object,
         }
     }
 }
@@ -208,6 +216,11 @@ impl GitObject {
 
                     let mode_enum = TreeFileModes::from(mode_str.to_string().as_str());
 
+                    let git_object_content = read_object(hash_str.as_str())?;
+
+                    let git_object =
+                        GitObject::from_file_content(hash_str.clone(), git_object_content)?;
+
                     let object = TreeObject {
                         hash: hash_str,
                         name: filename_str.to_string(),
@@ -216,7 +229,7 @@ impl GitObject {
 
                             _ => "blob".to_string(),
                         },
-
+                        git_object,
                         mode: mode_enum,
                     };
 
@@ -235,46 +248,56 @@ impl GitObject {
     }
 
     pub fn from_directory(dir_path: &str) -> anyhow::Result<Self> {
-        println!("path {dir_path}");
+        let all_files = list_directory(dir_path)?;
 
-        let files = list_directory(dir_path)?;
-
-        println!("Files: {:?}", files);
+        let files = filter_hidden_files(&all_files)?;
 
         let mut objects = Vec::new();
+
+        let mut objects_str = String::new();
 
         for entry in files {
             let file_path = entry.path();
 
-            let file_type = entry.file_type()?;
-
             let path_str = file_path.to_str().expect("Could not get path string");
 
-            let object = if file_type.is_dir() {
+            let file_type = entry.file_type()?;
+
+            let file_name = entry
+                .file_name()
+                .to_str()
+                .expect("Could not get file name")
+                .to_owned();
+
+            let git_object = if file_type.is_dir() {
                 GitObject::from_directory(path_str)?
             } else {
-                let compressed_content = read_file(path_str)?;
+                let content = read_file(path_str)?;
 
-                let content = decompress(&compressed_content)?;
-
-                let hash = generate_object_id(content.as_slice())?;
-
-                GitObject::from_file_content(hash, compressed_content)?
+                GitObject::from_file_content_and_type("blob", content.as_slice(), None)?
             };
 
-            let mode = TreeFileModes::from(file_type);
+            let object = TreeObject::new(
+                git_object.get_hash().to_owned(),
+                file_name,
+                TreeFileModes::from(file_type),
+                git_object,
+            );
 
-            objects.push(TreeObject::new(
-                object.get_hash(),
-                entry.file_name().to_str(),
-                mode,
-            ));
+            objects_str
+                .push_str(format!("{} {}\0{}", object.mode, object.name, object.hash).as_str());
+
+            objects.push(object);
         }
 
+        let final_content = format!("tree {}\0{objects_str}", objects_str.len());
+
+        let hash = generate_object_id(final_content.as_bytes())?;
+
         Ok(GitObject::Tree {
-            size: 0,
-            hash: String::new(),
+            hash,
             objects,
+            size: objects_str.len() as u64,
         })
     }
 
@@ -340,12 +363,7 @@ impl GitObject {
                 let mut objects_str = String::new();
 
                 for object in objects {
-                    let git_object_content = read_object(object.hash.as_str())?;
-
-                    let git_object =
-                        GitObject::from_file_content(object.hash.clone(), git_object_content)?;
-
-                    git_object.write_to_file()?;
+                    object.git_object.write_to_file()?;
 
                     objects_str.push_str(
                         format!("{} {}\0{}", object.mode, object.name, object.hash).as_str(),

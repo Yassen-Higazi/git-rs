@@ -68,11 +68,11 @@ impl Git {
             }
 
             Commands::WriteTree => {
-                println!("Write Tree");
-
                 let object = GitObject::from_directory(".")?;
 
-                println!("{}", object);
+                object.write_to_file()?;
+
+                print!("{}", object.get_hash());
             }
 
             _ => println!("Unsupported command: {}", command),
