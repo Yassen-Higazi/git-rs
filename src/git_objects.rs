@@ -369,7 +369,7 @@ impl GitObject {
             } => {
                 let path = create_object_directory(hash)?;
 
-                dbg!("Path: {}, {}, {}, {:?}", &path, &hash, size, &objects);
+                dbg!(&path, &hash, size, &objects);
 
                 let mut objects_vec = vec![format!("tree {size}\0").as_bytes().to_vec()];
 
