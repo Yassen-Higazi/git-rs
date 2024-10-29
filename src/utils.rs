@@ -2,8 +2,9 @@ use anyhow::{bail, Context};
 use flate2::write::{ZlibDecoder, ZlibEncoder};
 use flate2::Compression;
 use sha1::{Digest, Sha1};
-use std::fs::{self, DirEntry};
+use std::fs;
 use std::io::Write;
+use std::num::ParseIntError;
 
 pub fn to_hex_string(content: &[u8]) -> String {
     content
@@ -11,6 +12,13 @@ pub fn to_hex_string(content: &[u8]) -> String {
         .map(|b| format!("{:02x}", b).to_string())
         .collect::<Vec<String>>()
         .join("")
+}
+
+pub fn from_hex(s: &str) -> Result<Vec<u8>, ParseIntError> {
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
+        .collect()
 }
 
 pub fn generate_object_id(content: &[u8]) -> anyhow::Result<String> {
@@ -24,9 +32,10 @@ pub fn generate_object_id(content: &[u8]) -> anyhow::Result<String> {
 pub fn compress(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
     let mut e = ZlibEncoder::new(Vec::new(), Compression::default());
 
-    e.write_all(bytes)?;
+    e.write_all(bytes)
+        .with_context(|| "Could not write bytes to ZlibEncoder")?;
 
-    let compressed = e.finish()?;
+    let compressed = e.finish().with_context(|| "Could not compress Object")?;
 
     Ok(compressed)
 }
@@ -36,9 +45,10 @@ pub fn decompress(bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
 
     let mut z = ZlibDecoder::new(writer);
 
-    z.write_all(bytes)?;
+    z.write_all(bytes)
+        .with_context(|| "Could not write bytes to ZlibDecoder")?;
 
-    writer = z.finish()?;
+    writer = z.finish().with_context(|| "Could not decompress Object")?;
 
     // println!("Decompressed data: {:?}", writer);
 
@@ -142,7 +152,7 @@ pub fn get_hidden_files() -> anyhow::Result<Vec<String>> {
     Ok(hidden_files)
 }
 
-pub fn filter_hidden_files(files: &[DirEntry]) -> anyhow::Result<Vec<&fs::DirEntry>> {
+pub fn filter_hidden_files(files: &[fs::DirEntry]) -> anyhow::Result<Vec<&fs::DirEntry>> {
     let hidden_files = get_hidden_files()?;
 
     let allowed_files = files

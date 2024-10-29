@@ -3,8 +3,8 @@ use std::fs;
 use anyhow::bail;
 
 use crate::utils::{
-    compress, create_object_directory, decompress, filter_hidden_files, generate_object_id,
-    list_directory, read_file, read_object, to_hex_string, write_to_file,
+    compress, create_object_directory, decompress, filter_hidden_files, from_hex,
+    generate_object_id, list_directory, read_file, read_object, to_hex_string, write_to_file,
 };
 
 #[derive(Debug)]
@@ -254,7 +254,7 @@ impl GitObject {
 
         let mut objects = Vec::new();
 
-        let mut objects_str = String::new();
+        let mut objects_vec = Vec::new();
 
         for entry in files {
             let file_path = entry.path();
@@ -284,20 +284,29 @@ impl GitObject {
                 git_object,
             );
 
-            objects_str
-                .push_str(format!("{} {}\0{}", object.mode, object.name, object.hash).as_str());
+            let object_buf = [
+                format!("{} {}\0", object.mode, object.name).as_bytes(),
+                from_hex(object.hash.as_str())?.as_slice(),
+            ]
+            .concat();
+
+            objects_vec.push(object_buf);
 
             objects.push(object);
         }
 
-        let final_content = format!("tree {}\0{objects_str}", objects_str.len());
+        let objects_buffer = objects_vec.concat();
 
-        let hash = generate_object_id(final_content.as_bytes())?;
+        let final_content = [
+            format!("tree {}\0", objects_buffer.len()).as_bytes(),
+            objects_buffer.as_slice(),
+        ]
+        .concat();
 
         Ok(GitObject::Tree {
-            hash,
             objects,
-            size: objects_str.len() as u64,
+            size: objects_buffer.len() as u64,
+            hash: generate_object_id(final_content.as_slice())?,
         })
     }
 
@@ -360,19 +369,27 @@ impl GitObject {
             } => {
                 let path = create_object_directory(hash)?;
 
-                let mut objects_str = String::new();
+                dbg!("Path: {}, {}, {}, {:?}", &path, &hash, size, &objects);
+
+                let mut objects_vec = vec![format!("tree {size}\0").as_bytes().to_vec()];
 
                 for object in objects {
                     object.git_object.write_to_file()?;
 
-                    objects_str.push_str(
-                        format!("{} {}\0{}", object.mode, object.name, object.hash).as_str(),
-                    )
+                    let object_buf = [
+                        format!("{} {}\0", object.mode, object.name).as_bytes(),
+                        from_hex(object.hash.as_str())?.as_slice(),
+                    ]
+                    .concat();
+
+                    // println!("Object Hash: {}", object.hash);
+
+                    objects_vec.push(object_buf);
                 }
 
-                let final_content = format!("tree {size}\0{objects_str}");
+                let final_content = compress(objects_vec.concat().as_slice())?;
 
-                write_to_file(path.as_str(), final_content.as_bytes())?;
+                write_to_file(path.as_str(), final_content.as_slice())?;
 
                 Ok(())
             }
