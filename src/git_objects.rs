@@ -96,7 +96,7 @@ impl std::fmt::Display for TreeFileModes {
             TreeFileModes::Regular => "100644",
             TreeFileModes::Executable => "100755",
             TreeFileModes::SymbolicLink => "120000",
-            TreeFileModes::Directory => "040000",
+            TreeFileModes::Directory => "40000",
         };
 
         write!(f, "{value}")
@@ -250,7 +250,15 @@ impl GitObject {
     pub fn from_directory(dir_path: &str) -> anyhow::Result<Self> {
         let all_files = list_directory(dir_path)?;
 
-        let files = filter_hidden_files(&all_files)?;
+        let mut files = filter_hidden_files(&all_files)?;
+
+        files.sort_by_key(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .expect("Could not get file name to sort directories")
+                .to_owned()
+        });
 
         let mut objects = Vec::new();
 
@@ -278,7 +286,7 @@ impl GitObject {
             };
 
             let object = TreeObject::new(
-                git_object.get_hash().to_owned(),
+                git_object.get_hash().to_string(),
                 file_name,
                 TreeFileModes::from(file_type),
                 git_object,
@@ -297,15 +305,17 @@ impl GitObject {
 
         let objects_buffer = objects_vec.concat();
 
+        let tree_size = objects_buffer.len() as u64;
+
         let final_content = [
-            format!("tree {}\0", objects_buffer.len()).as_bytes(),
+            format!("tree {}\0", tree_size).as_bytes(),
             objects_buffer.as_slice(),
         ]
         .concat();
 
         Ok(GitObject::Tree {
             objects,
-            size: objects_buffer.len() as u64,
+            size: tree_size,
             hash: generate_object_id(final_content.as_slice())?,
         })
     }
@@ -368,8 +378,6 @@ impl GitObject {
                 objects,
             } => {
                 let path = create_object_directory(hash)?;
-
-                dbg!(&path, &hash, size, &objects);
 
                 let mut objects_vec = vec![format!("tree {size}\0").as_bytes().to_vec()];
 

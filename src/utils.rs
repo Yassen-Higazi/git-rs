@@ -155,7 +155,7 @@ pub fn get_hidden_files() -> anyhow::Result<Vec<String>> {
 pub fn filter_hidden_files(files: &[fs::DirEntry]) -> anyhow::Result<Vec<&fs::DirEntry>> {
     let hidden_files = get_hidden_files()?;
 
-    let allowed_files = files
+    let allowed_files: Vec<&fs::DirEntry> = files
         .iter()
         .filter(|entry| {
             let file_name = entry.file_name().to_str().unwrap_or(".git").to_string();
