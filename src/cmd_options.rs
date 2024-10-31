@@ -20,7 +20,9 @@ pub enum Commands {
         #[arg(short = 's', long = "size")]
         size: bool,
 
-        hash: String,
+        object_type: Option<String>,
+
+        hash: Option<String>,
     },
 
     HashObject {
@@ -40,6 +42,16 @@ pub enum Commands {
         hash: String,
     },
 
+    CommitTree {
+        #[arg(short = 'm', long = "message")]
+        message: String,
+
+        #[arg(short = 'p', long = "parent")]
+        parent: Option<String>,
+
+        tree: String,
+    },
+
     WriteTree,
 
     Init,
@@ -56,6 +68,7 @@ impl Display for Commands {
             Commands::LsTree { .. } => "ls-tree",
             Commands::CatFile { .. } => "cat-file",
             Commands::HashObject { .. } => "hash-object",
+            Commands::CommitTree { .. } => "commit-tree",
         };
 
         write!(f, "{command_name}")

@@ -120,8 +120,9 @@ pub enum GitObject {
     #[allow(dead_code)]
     Commit {
         hash: String,
+        message: String,
         tree: Box<GitObject>,
-        parent: Box<GitObject>,
+        parent: Option<Vec<GitObject>>,
 
         author_name: String,
         author_email: String,
@@ -146,6 +147,27 @@ impl std::fmt::Display for GitObject {
 }
 
 impl GitObject {
+    pub fn new_commit(
+        message: &str,
+        hash: &str,
+        tree: GitObject,
+        parent: Option<Vec<GitObject>>,
+    ) -> Self {
+        let username = String::from("Yassen Higazi");
+        let email = String::from("yassenka28@gmail.com");
+
+        GitObject::Commit {
+            parent,
+            tree: Box::new(tree),
+            hash: hash.to_string(),
+            message: message.to_string(),
+            author_name: username.clone(),
+            author_email: email.clone(),
+            committer_name: username,
+            committer_email: email,
+        }
+    }
+
     pub fn from_file_content(
         hash: String,
         compressed_content: Vec<u8>,
@@ -243,6 +265,93 @@ impl GitObject {
                 })
             }
 
+            "commit" => {
+                let hash = GitObject::get_or_generate_hash(obj_type, hash, content)?;
+
+                let content_str = String::from_utf8(content.to_vec())?;
+
+                let content_split: Vec<&str> = content_str.split("\n").collect();
+
+                let tree_line: Vec<&str> = content_split[0].split(" ").collect();
+
+                let tree_hash = tree_line[1];
+
+                let tree_object_content = read_object(tree_hash)?;
+
+                let tree_object =
+                    GitObject::from_file_content(tree_hash.to_string(), tree_object_content)?;
+
+                let mut line_index = 1;
+
+                #[allow(unused_assignments)]
+                let mut message = String::new();
+
+                let mut parents: Vec<GitObject> = vec![];
+
+                let mut author_name = String::new();
+
+                let mut author_email = String::new();
+
+                let mut committer_name = String::new();
+
+                let mut committer_email = String::new();
+
+                loop {
+                    let current_line = content_split[line_index];
+
+                    if current_line.starts_with("parent") {
+                        let parent_line: Vec<&str> = current_line.split(" ").collect();
+
+                        let parent_hash = parent_line[1];
+
+                        let parent_object_content = read_object(parent_hash)?;
+
+                        let parent_object = GitObject::from_file_content(
+                            parent_hash.to_string(),
+                            parent_object_content,
+                        )?;
+
+                        parents.push(parent_object);
+                    } else if current_line.starts_with("author") {
+                        let author_line: Vec<&str> = current_line.split(" ").collect();
+
+                        author_name = author_line[1].to_string();
+
+                        author_email = author_line[2].to_string().replace("<", "").replace(">", "");
+                    } else if current_line.starts_with("committer") {
+                        let committer_line: Vec<&str> = current_line.split(" ").collect();
+
+                        committer_name = committer_line[1].to_string();
+
+                        committer_email = committer_line[2]
+                            .to_string()
+                            .replace("<", "")
+                            .replace(">", "");
+                    } else {
+                        message = content_split[line_index + 1].to_string();
+
+                        break;
+                    }
+
+                    line_index += 1;
+                }
+
+                Ok(GitObject::Commit {
+                    hash,
+                    message,
+                    author_name,
+                    author_email,
+                    committer_name,
+                    committer_email,
+                    tree: Box::new(tree_object),
+                    parent: if parents.is_empty() {
+                        None
+                    } else {
+                        Some(parents)
+                    },
+                })
+            }
+
             _ => bail!("Unsupported Type"),
         }
     }
@@ -334,12 +443,39 @@ impl GitObject {
                 }
             }
 
-            GitObject::Commit { .. } => todo!(),
+            GitObject::Commit {
+                message,
+                tree,
+                parent,
+                author_name,
+                author_email,
+                committer_name,
+                committer_email,
+                ..
+            } => {
+                println!("tree {}", tree.get_hash());
+
+                if let Some(parents) = parent {
+                    for parent in parents {
+                        println!("parent {}", parent.get_hash());
+                    }
+                }
+
+                println!("author {author_name} <{author_email}> 1730371859 +0300");
+
+                println!("committer {committer_name} <{committer_email}> 1730371859 +0300\n");
+
+                println!("{message}");
+            }
         }
     }
 
     pub fn print_type(&self) {
         print!("{}", self);
+    }
+
+    pub fn get_type(&self) -> String {
+        format!("{}", self)
     }
 
     pub fn print_size(&self) -> anyhow::Result<()> {
@@ -390,8 +526,6 @@ impl GitObject {
                     ]
                     .concat();
 
-                    // println!("Object Hash: {}", object.hash);
-
                     objects_vec.push(object_buf);
                 }
 
@@ -402,7 +536,72 @@ impl GitObject {
                 Ok(())
             }
 
-            _ => bail!("Not Implemented"),
+            GitObject::Commit {
+                hash,
+                tree,
+                parent,
+                message,
+                author_name,
+                author_email,
+                committer_name,
+                committer_email,
+            } => {
+                let path = create_object_directory(hash)?;
+
+                let mut content: Vec<Vec<u8>> = vec![
+                    b"tree ".to_vec(),
+                    tree.get_hash().as_bytes().to_vec(),
+                    b"\n".to_vec(),
+                ];
+
+                let mut parents: Vec<Vec<u8>> = vec![];
+
+                if let Some(parent_commits) = parent {
+                    for commit in parent_commits {
+                        parents.push(b"parent ".to_vec());
+
+                        parents.push(commit.get_hash().as_bytes().to_vec());
+
+                        parents.push(b"\n".to_vec());
+                    }
+                }
+
+                content.push(parents.concat());
+
+                content.push(
+                    format!("author {author_name} <{author_email}>")
+                        .as_bytes()
+                        .to_vec(),
+                );
+
+                content.push(b"\n".to_vec());
+
+                content.push(
+                    format!("committer {committer_name} <{committer_email}>")
+                        .as_bytes()
+                        .to_vec(),
+                );
+
+                content.push(b"\n\n".to_vec());
+
+                content.push(message.as_bytes().to_vec());
+
+                content.push(b"\n".to_vec());
+
+                let uncomposed_content = content.concat();
+
+                let final_content = [
+                    format!("commit {}\0", uncomposed_content.len()).as_bytes(),
+                    uncomposed_content.as_slice(),
+                ]
+                .concat();
+
+                let compressed_content = compress(&final_content)?;
+
+                write_to_file(path.as_str(), compressed_content.as_slice())?;
+
+                Ok(())
+            }
         }
     }
 
@@ -412,6 +611,14 @@ impl GitObject {
             GitObject::Tree { hash, .. } => hash,
             GitObject::Commit { hash, .. } => hash,
         }
+    }
+
+    pub fn is_tree(&self) -> bool {
+        matches!(self, GitObject::Tree { .. })
+    }
+
+    pub fn is_commit(&self) -> bool {
+        matches!(self, GitObject::Commit { .. })
     }
 
     fn get_or_generate_hash(
